@@ -1,0 +1,161 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
+# Configure the AWS Provider
+provider "aws" {
+  region = "us-east-1"
+}
+
+#vpc
+resource "aws_vpc" "my-vpc" {
+  cidr_block       = "10.0.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name = "my-vpc"
+  }
+}
+
+#create subnet-pub
+resource "aws_subnet" "subnet-pub" {
+  vpc_id     = aws_vpc.my-vpc.id
+  cidr_block = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+  tags = {
+    Name = "subnet-pub"
+  }
+}
+
+#create subnet-pvt
+resource "aws_subnet" "subnet-pvt" {
+  vpc_id     = aws_vpc.my-vpc.id
+  cidr_block = "10.0.2.0/24"
+  availability_zone = "us-east-1b"
+  tags = {
+    Name = "subnet-pvt"
+  }
+}
+
+#create internet gateway
+resource "aws_internet_gateway" "tfgw" {
+  vpc_id = aws_vpc.my-vpc.id
+
+  tags = {
+    Name = "tfgw"
+  }
+}
+
+#create route table-public
+resource "aws_route_table" "routepub" {
+  vpc_id = aws_vpc.my-vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.tfgw.id
+  }
+
+  tags = {
+    Name = "routepub"
+  }
+}
+
+# create association route table-public
+resource "aws_route_table_association" "rtsubpub" {
+  subnet_id      = aws_subnet.subnet-pub.id
+  route_table_id = aws_route_table.routepub.id
+}
+
+
+#create route table-private
+resource "aws_route_table" "routepvt" {
+  vpc_id = aws_vpc.my-vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_nat_gateway.mynat.id
+  }
+
+  tags = {
+    Name = "routepvt"
+  }
+}
+
+# create association route table-private
+resource "aws_route_table_association" "rtsubpvt" {
+  subnet_id      = aws_subnet.subnet-pvt.id
+  route_table_id = aws_route_table.routepvt.id
+}
+
+#create security group
+resource "aws_security_group" "mysgpub" {
+  name        = "allow_tcp"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.my-vpc.id
+
+  ingress {
+    description      = "all tcp"
+    from_port        = 0
+    to_port          = 65535
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+    #ipv6_cidr_blocks = [aws_vpc.main.ipv6_cidr_block]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Name = "allow_tls"
+  }
+}
+
+#Elastic ip
+resource "aws_eip" "teip" {
+ vpc      = true
+}
+
+#nat gateway
+resource "aws_nat_gateway" "mynat" {
+  allocation_id = aws_eip.teip.id
+  subnet_id     = aws_subnet.subnet-pub.id
+
+  tags = {
+    Name = "NAT"
+  }
+}
+
+#create ec2- webserver
+resource "aws_instance" "webserver" {
+  ami           = "ami-05e411cf591b5c9f6"
+  instance_type = "t2.micro"
+  associate_public_ip_address = true
+  subnet_id = aws_subnet.subnet-pub.id  
+  vpc_security_group_ids = [aws_security_group.mysgpub.id]
+  tags = {
+    Name = "webserver"
+  }
+}
+
+#create ec2-Helloworld
+resource "aws_instance" "Helloworld" {
+  ami           = "ami-05e411cf591b5c9f6"
+  instance_type = "t2.micro"
+  associate_public_ip_address = true
+  subnet_id = aws_subnet.subnet-pvt.id
+  vpc_security_group_ids = [aws_security_group.mysgpub.id]
+  
+  tags = {
+    Name = "hello"
+  }
+}
